@@ -199,6 +199,7 @@ metrics(_) ->
 	do_upgrade_downgrade_test(metrics, tcp_echo).
 
 connection_alarms(_) ->
+	doc("Ensure that connection count alarms work after upgrading."),
 	do_upgrade_downgrade_test(connection_alarms, tcp_echo).
 
 do_upgrade_downgrade_test(Test, App) ->
@@ -251,6 +252,7 @@ do_before_upgrade(metrics, App, Config) ->
 do_before_upgrade(connection_alarms, App, Config) ->
 	AppStr = atom_to_list(App),
 	{_, Rel, _} = do_get_paths(App),
+	%% Ensure that connection alarms cannot be created in the old release.
 	"{error,{bad_option,alarms}}\n" = do_exec_log(Rel ++ " eval "
 		"'ranch:set_transport_options(" ++ AppStr ++ ", "
 		"#{alarms => #{test => {num_connections, #{treshold => 1, "
@@ -309,21 +311,29 @@ do_after_upgrade(connection_alarms, App, Config) ->
 	AppStr = atom_to_list(App),
 	{_, Rel, _} = do_get_paths(App),
 	Port = maps:get(port, Config),
+	%% Configure a connection count alarm, to be fired with every new connection.
 	"ok\n" = do_exec_log(Rel ++ " eval "
 		"'ranch:set_transport_options(" ++ AppStr ++ ", "
 		"#{alarms => #{test => {num_connections, #{treshold => 1, "
 		"cooldown => 0, callback => fun (Ref, _, _, _) -> persistent_term:put({connection_alarms, Ref}, persistent_term:get({connection_alarms, Ref}, 0)+1) end}}}})'"),
+	%% Establish 1 connection, ensure that it raised an alarm.
 	{ok, S1} = gen_tcp:connect("localhost", Port, [{active, false}, binary]),
 	"1\n" = do_exec_log(Rel ++ " eval 'persistent_term:get({connection_alarms, " ++ AppStr ++ "})'"),
+	%% Establish one more connection, ensure that is raised another alarm.
 	{ok, S2} = gen_tcp:connect("localhost", Port, [{active, false}, binary]),
 	"2\n" = do_exec_log(Rel ++ " eval 'persistent_term:get({connection_alarms, " ++ AppStr ++ "})'"),
-	"true\n" = do_exec_log(Rel ++ " eval 'persistent_term:erase({connection_alarms, " ++ AppStr ++ "})'"),
+%%	"true\n" = do_exec_log(Rel ++ " eval 'persistent_term:erase({connection_alarms, " ++ AppStr ++ "})'"),
 	ok = gen_tcp:close(S1),
 	ok = gen_tcp:close(S2),
 	{ok, Config};
 do_after_upgrade(_Test, _App, Config) ->
 	{ok, Config}.
 
+do_before_downgrade(connection_alarms, App, Config) ->
+	AppStr = atom_to_list(App),
+	{_, Rel, _} = do_get_paths(App),
+	"true\n" = do_exec_log(Rel ++ " eval 'persistent_term:erase({connection_alarms, " ++ AppStr ++ "})'"),
+	{ok, Config};
 do_before_downgrade(_Test, _App, Config) ->
 	{ok, Config}.
 

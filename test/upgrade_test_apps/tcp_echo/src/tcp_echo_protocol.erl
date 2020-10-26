@@ -1,6 +1,6 @@
 %% Feel free to use, reuse and abuse the code in this file.
 
--module(echo_protocol).
+-module(tcp_echo_protocol).
 -behaviour(ranch_protocol).
 
 -export([start_link/3]).

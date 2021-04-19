@@ -129,7 +129,8 @@ do_listen(SocketOpts0, Logger) ->
 	SocketOpts1 = ranch:set_option_default(SocketOpts0, backlog, 1024),
 	SocketOpts2 = ranch:set_option_default(SocketOpts1, nodelay, true),
 	SocketOpts3 = ranch:set_option_default(SocketOpts2, send_timeout, 30000),
-	SocketOpts = ranch:set_option_default(SocketOpts3, send_timeout_close, true),
+	SocketOpts4 = ranch:set_option_default(SocketOpts3, send_timeout_close, true),
+	SocketOpts = strip_unsupported_options(SocketOpts4),
 	%% We set the port to 0 because it is given in the Opts directly.
 	%% The port in the options takes precedence over the one in the
 	%% first argument.
@@ -296,3 +297,25 @@ cleanup(#{socket_opts:=SocketOpts}) ->
 	end;
 cleanup(_) ->
 	ok.
+
+-spec strip_unsupported_options(opts()) -> opts().
+strip_unsupported_options(SocketOpts) ->
+    Versions1 = lists:keyfind(versions, 1, SocketOpts),
+    Versions2 = lists:keyfind(protocol_versions, 1, SocketOpts),
+    if
+        (Versions1 == {versions, ['tlsv1.3']}) or (Versions2 == {protocol_versions, ['tlsv1.3']}) ->
+            NewSocketOpts = lists:filter(fun({X, _}) ->
+                    (X /= secure_renegotiate) and (X /= reuse_sessions) and (X /= next_protocols_advertised) and (X /= alpn_preferred_protocols);
+                (_) ->
+                    true
+                end, SocketOpts),
+            if
+                NewSocketOpts /= SocketOpts ->
+                    error_logger:warning_msg("~p~n dropping options unsupported by TLS1.3-only ssl sockets: " ++
+                    "secure_renegotiate, reuse_sessions, next_protocols_advertised and/or alpn_preferred_protocols from ~p~n", [?MODULE, SocketOpts])
+            end,
+            NewSocketOpts;
+        true ->
+            SocketOpts
+    end.
+
